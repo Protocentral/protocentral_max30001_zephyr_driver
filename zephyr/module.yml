@@ -1,0 +1,6 @@
+name: MAX30001 ECG/BioZ driver
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    dts_root: .
