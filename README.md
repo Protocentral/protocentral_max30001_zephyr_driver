@@ -1,6 +1,6 @@
 # Protocentral MAX30001 Zephyr out of tree driver
 
-This is the Zephyr driver for the MAX30001 single-lead ECG / BioZ monitoring IC from Maxim.
+This is the Zephyr driver for the MAX30001 single-lead ECG / BioZ monitoring IC from Maxim. The driver was designed for use with Protocentral's MAX30001 boards including the [MAX30001 Breakout Board](https://protocentral.com/product/protocentral-max30001/), [ProtoCentral tinyECG – MAX30001 ECG/Respiration module for QT Py / XIAO](https://protocentral.com/product/protocentral-tinyecg-max30001-ecg-respiration-module-for-qt-py-xiao/) and [HealthyPi 5 Vital Signs Monitoring HAT Kit](https://protocentral.com/product/healthypi-5-vital-signs-monitoring-hat-kit/), but it should work with any board that uses the MAX30001 IC.
 
 MAX30001 is a single-lead ECG monitoring IC which has built-in R-R detection and several other features that make it perfect for a wearable single-lead ECG application.
 
