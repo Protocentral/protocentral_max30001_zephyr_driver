@@ -45,7 +45,8 @@ static int _max30001_read_chip_id(const struct device *dev, uint8_t *buf)
     const struct spi_buf_set rx = {.buffers = rx_buf, .count = 2};
 
     spi_transceive_dt(&config->spi, &tx, &rx); // regRxBuffer 0 contains NULL (for sent command), so read from 1 onwards
-    LOG_INF("ChipID: %x %x %x\n", (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2]);
+    
+    printk("MAX30001 ID: %x %x %x\n", (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2]);
 
     return 0;
 }
@@ -64,7 +65,7 @@ static uint32_t _max30001_read_status(const struct device *dev)
     const struct spi_buf_set rx = {.buffers = rx_buf, .count = 2};
 
     spi_transceive_dt(&config->spi, &tx, &rx); // regRxBuffer 0 contains NULL (for sent command), so read from 1 onwards
-    // printk("Stat: %x %x %x\n", (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2]);
+    //printk("Stat: %x %x %x\n", (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2]);
 
     return (uint32_t)(buf[0] << 16) | (buf[1] << 8) | buf[2];
 }
@@ -128,7 +129,7 @@ static int _max30001_read_ecg_fifo(const struct device *dev, int num_bytes)
     spi_transceive_dt(&config->spi, &tx, &rx);
 
     // regRxBuffer 0 contains NULL (for sent command), so read from 1 onwards
-    // printk("%x %x %x %x\n", regRxBuffer[0], regRxBuffer[1], regRxBuffer[2], regRxBuffer[3]);
+    //printk("%x %x %x %x\n", regRxBuffer[0], regRxBuffer[1], regRxBuffer[2], regRxBuffer[3]);
 
     for (int i = 0; i < num_bytes; i += 3)
     {
@@ -221,8 +222,8 @@ static void max30001_enable_ecg(const struct device *dev)
     _max30001RegWrite(dev, CNFG_EMUX, 0x0B0000); // Pins internally connection to ECG Channels
     k_sleep(K_MSEC(100));
 
-    _max30001RegWrite(dev, CNFG_ECG, 0x835000); // Gain 160
-    k_sleep(K_MSEC(100));
+    //_max30001RegWrite(dev, CNFG_ECG, 0x835000); // Gain 160
+    //k_sleep(K_MSEC(100));
 }
 
 static void max30001_enable_bioz(const struct device *dev)
@@ -290,19 +291,25 @@ static int max30001_sample_fetch(const struct device *dev,
     struct max30001_data *data = dev->data;
 
     max30001_status = _max30001_read_status(dev);
-    // printk("Status: %x\n", max30001_status);
+    //printk("Status: %x\n", max30001_status);
 
     if ((max30001_status & MAX30001_STATUS_MASK_DCLOFF) == MAX30001_STATUS_MASK_DCLOFF)
     {
         // Leads are off
         // printk("LO");
+        // LOG_INF("Leads Off\n");
+        data->ecg_lead_off = 1;
+    }
+    else
+    {
+        data->ecg_lead_off = 0;
     }
 
     if ((max30001_status & MAX30001_STATUS_MASK_EINT) == MAX30001_STATUS_MASK_EINT) // EINT bit is set, FIFO is full
     {
         max30001_mngr_int = _max30001_read_reg(dev, MNGR_INT);
         e_fifo_num_bytes = ((((max30001_mngr_int & MAX30001_INT_MASK_EFIT) >> MAX30001_INT_SHIFT_EFIT) + 1) * 3);
-        // printk("EFN %d ", e_fifo_num_bytes);
+        //printk("EFN %d ", e_fifo_num_bytes);
         _max30001_read_ecg_fifo(dev, e_fifo_num_bytes);
     }
 
@@ -357,6 +364,9 @@ static int max30001_channel_get(const struct device *dev,
     case SENSOR_CHAN_HR:
         val->val1 = data->lastHR;
         break;
+    case SENSOR_CHAN_LDOFF:
+        val->val1 = data->ecg_lead_off;
+        break;
     default:
         return -EINVAL;
     }
@@ -378,6 +388,7 @@ static int max30001_attr_set(const struct device *dev,
         else if (val->val1 == 0)
         {
             // Disable ECG
+            max30001_disable_ecg(dev);
         }
 
         break;
@@ -389,6 +400,7 @@ static int max30001_attr_set(const struct device *dev,
         else if (val->val1 == 0)
         {
             // Disable BioZ
+            max30001_disable_bioz(dev);
         }
         break;
     case MAX30001_ATTR_RTOR_ENABLED:
@@ -399,11 +411,8 @@ static int max30001_attr_set(const struct device *dev,
         else if (val->val1 == 0)
         {
             // Disable RTOR
+            max30001_disable_rtor(dev);
         }
-        break;
-    case MAX30001_ATTR_DCLOFF_ENABLED:
-        // Enable DCLOFF
-        _max30001RegWrite(dev, CNFG_GEN, 0xC1514); // DC LOFF Enabled, 5 nA current
         break;
     default:
         return -ENOTSUP;
@@ -411,9 +420,17 @@ static int max30001_attr_set(const struct device *dev,
     return 0;
 }
 
+static int max30001_load_settings_regs(const struct device *dev)
+{
+
+    return 0;
+}
+
 static int max30001_chip_init(const struct device *dev)
 {
     const struct max30001_config *config = dev->config;
+    struct max30001_data *data = dev->data;
+
     int err;
 
     // bool en_bioz = true;
@@ -433,24 +450,123 @@ static int max30001_chip_init(const struct device *dev)
     uint8_t chip_id[3];
     _max30001_read_chip_id(dev, chip_id);
 
-    /*if (en_dcloff == true)
+    if(chip_id[0]!=0x54)
     {
+        LOG_ERR("MAX30001 not found");
+        return -ENODEV;
+    }
 
+    // Load settings from the device tree
+
+    // General Configuration
+    data->chip_cfg.reg_cnfg_gen.bit.en_ulp_lon = 0;
+    data->chip_cfg.reg_cnfg_gen.bit.fmstr = 0;
+
+    // data->chip_cfg.reg_cnfg_gen.bit.en_bioz = 0;
+
+    data->chip_cfg.reg_cnfg_gen.bit.en_dcloff = 0;
+    data->chip_cfg.reg_cnfg_gen.bit.en_bloff = 0;
+    data->chip_cfg.reg_cnfg_gen.bit.en_rbias = 0;
+    data->chip_cfg.reg_cnfg_gen.bit.rbiasv = 1;
+    data->chip_cfg.reg_cnfg_gen.bit.rbiasp = 0;
+    data->chip_cfg.reg_cnfg_gen.bit.rbiasn = 0;
+
+    // Gen Config enable/disable ECG
+    if (config->ecg_enabled)
+    {
+        data->chip_cfg.reg_cnfg_gen.bit.en_ecg = 1;
     }
     else
     {
+        data->chip_cfg.reg_cnfg_gen.bit.en_ecg = 0;
+    }
 
-    }*/
+    // Gen Config enable/disable BIOZ
+    if (config->bioz_enabled)
+    {
+        data->chip_cfg.reg_cnfg_gen.bit.en_bioz = 1;
+    }
+    else
+    {
+        data->chip_cfg.reg_cnfg_gen.bit.en_bioz = 0;
+    }
 
-    max30001_enable_ecg(dev);
+    // Gen Config enable/disable LOFF
+    if (config->ecg_dcloff_enabled)
+    {
+        data->chip_cfg.reg_cnfg_gen.bit.en_dcloff = 1;
+        data->chip_cfg.reg_cnfg_gen.bit.imag = config->ecg_dcloff_current;
+    }
+    else
+    {
+        data->chip_cfg.reg_cnfg_gen.bit.en_dcloff = 0;
+    }
 
-    max30001_enable_bioz(dev);
+    // ECG Configuration
+    data->chip_cfg.reg_cnfg_ecg.bit.rate = 0b10;             // 128 SPS
+    data->chip_cfg.reg_cnfg_ecg.bit.gain = config->ecg_gain; // From DTS
+    data->chip_cfg.reg_cnfg_ecg.bit.dlpf = 0b01;             // 40 Hz
+    data->chip_cfg.reg_cnfg_ecg.bit.dhpf = 0b01;             // 0.5 Hz
 
-    max30001_enable_rtor(dev);
+    // ECG MUX Configuration
+    data->chip_cfg.reg_cnfg_emux.bit.openp = 0;
+    data->chip_cfg.reg_cnfg_emux.bit.openn = 0;
+    data->chip_cfg.reg_cnfg_emux.bit.pol = config->ecg_invert; // From DTS
+    data->chip_cfg.reg_cnfg_emux.bit.calp_sel = 0;
+    data->chip_cfg.reg_cnfg_emux.bit.caln_sel = 0;
 
-    _max30001RegWrite(dev, CNFG_GEN, 0xC0004); // ECG, BIOZ Enabled, DC LOFF disabled
+    // BIOZ Configuration
+    data->chip_cfg.reg_cnfg_bioz.bit.rate = 0;                 // 64 SPS
+    data->chip_cfg.reg_cnfg_bioz.bit.ahpf = 0b010;             // 500 Hz
+    data->chip_cfg.reg_cnfg_bioz.bit.dlpf = 0b01;              // 40 Hz
+    data->chip_cfg.reg_cnfg_bioz.bit.dhpf = 0b010;             // 0.5 Hz
+    data->chip_cfg.reg_cnfg_bioz.bit.gain = config->bioz_gain; // FROM DTS
+    data->chip_cfg.reg_cnfg_bioz.bit.fcgen = 0b0100;
+    data->chip_cfg.reg_cnfg_bioz.bit.cgmon = 0;
+    data->chip_cfg.reg_cnfg_bioz.bit.cgmag = config->bioz_cgmag; // FROM DTS
+    data->chip_cfg.reg_cnfg_bioz.bit.phoff = 0b0011;
 
+    // BIOZ MUX Configuration
+    data->chip_cfg.reg_cnfg_bmux.bit.openp = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.openn = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.calp_sel = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.caln_sel = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.cg_mode = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.en_bist = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.rnom = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.rmod = 0;
+    data->chip_cfg.reg_cnfg_bmux.bit.fbist = 0;
+
+    _max30001RegWrite(dev, CNFG_GEN, data->chip_cfg.reg_cnfg_gen.all);
+    //_max30001RegWrite(dev, CNFG_GEN, 0xC0004); // ECG, BIOZ Enabled, DC LOFF disabled
     k_sleep(K_MSEC(100));
+
+    // max30001_enable_ecg(dev);
+    LOG_INF("Enabling MAX30001 ECG");
+
+    _max30001RegWrite(dev, CNFG_ECG, data->chip_cfg.reg_cnfg_ecg.all);
+    //_max30001RegWrite(dev, CNFG_ECG, 0x835000); // Gain 160
+    k_sleep(K_MSEC(100));
+
+    _max30001RegWrite(dev, CNFG_EMUX, data->chip_cfg.reg_cnfg_emux.all);
+    //_max30001RegWrite(dev, CNFG_EMUX, 0x0B0000); // Pins internally connection to ECG Channels
+    k_sleep(K_MSEC(100));
+
+    // max30001_enable_bioz(dev);
+    LOG_INF("Enabling MAX30001 BioZ");
+    _max30001RegWrite(dev, CNFG_BIOZ, data->chip_cfg.reg_cnfg_bioz.all);
+    //_max30001RegWrite(dev, CNFG_BIOZ, 0 x201433);
+    k_sleep(K_MSEC(100));
+
+    // Set MAX30001G specific BioZ LC
+    _max30001RegWrite(dev, CNFG_BIOZ_LC, 0x800000); // Turn OFF low current mode
+    k_sleep(K_MSEC(100));
+
+    _max30001RegWrite(dev, CNFG_BMUX, data->chip_cfg.reg_cnfg_bmux.all);
+    //_max30001RegWrite(dev, CNFG_BMUX, 0x000040);
+    k_sleep(K_MSEC(100));
+
+    // max30001_enable_rtor(dev);
 
     _max30001RegWrite(dev, CNFG_CAL, 0x702000); // Calibration sources disabled
     k_sleep(K_MSEC(100));
@@ -458,13 +574,19 @@ static int max30001_chip_init(const struct device *dev)
     //_max30001RegWrite(dev, MNGR_INT, 0x7B0000); // EFIT=16, BFIT=8
     _max30001RegWrite(dev, MNGR_INT, 0x080000); // EFIT=2, BFIT=2
     //_max30001RegWrite(dev, MNGR_INT, 0x000000); // EFIT=1, BFIT=1
-
     k_sleep(K_MSEC(100));
+
+    if (config->rtor_enabled)
+    {
+        max30001_enable_rtor(dev);
+    }
+    else
+    {
+        max30001_disable_rtor(dev);
+    }
 
     _max30001Synch(dev);
     k_sleep(K_MSEC(100));
-
-    printk("MAX30001 Init!\n");
 
     LOG_DBG("\"%s\" OK", dev->name);
     return 0;
@@ -474,6 +596,11 @@ static const struct sensor_driver_api max30001_api_funcs = {
     .attr_set = max30001_attr_set,
     .sample_fetch = max30001_sample_fetch,
     .channel_get = max30001_channel_get,
+
+#ifdef CONFIG_SENSOR_ASYNC_API
+    .submit = max30001_submit,
+    .get_decoder = max30001_get_decoder,
+#endif
 };
 
 #define MAX30001_SPI_OPERATION (SPI_WORD_SET(8) | SPI_TRANSFER_MSB)
@@ -482,22 +609,36 @@ static const struct sensor_driver_api max30001_api_funcs = {
  * Main instantiation macro, which selects the correct bus-specific
  * instantiation macros for the instance.
  */
-#define MAX30001_DEFINE(inst)                                    \
-    static struct max30001_data max30001_data_##inst;            \
-    static const struct max30001_config max30001_config_##inst = \
-        {                                                        \
-            .spi = SPI_DT_SPEC_INST_GET(                         \
-                inst, MAX30001_SPI_OPERATION, 0),                \
-                                                                 \
-    };                                                           \
-                                                                 \
-    SENSOR_DEVICE_DT_INST_DEFINE(inst,                           \
-                                 max30001_chip_init,             \
-                                 PM_DEVICE_DT_INST_GET(inst),    \
-                                 &max30001_data_##inst,          \
-                                 &max30001_config_##inst,        \
-                                 POST_KERNEL,                    \
-                                 CONFIG_SENSOR_INIT_PRIORITY,    \
+#define MAX30001_DEFINE(inst)                                             \
+    static struct max30001_data max30001_data_##inst;                     \
+    static const struct max30001_config max30001_config_##inst =          \
+        {                                                                 \
+            .spi = SPI_DT_SPEC_INST_GET(                                  \
+                inst, MAX30001_SPI_OPERATION, 0),                         \
+            .ecg_gain = DT_INST_PROP(inst, ecg_gain),                     \
+            .bioz_gain = DT_INST_PROP(inst, bioz_gain),                   \
+            .bioz_cgmag = DT_INST_PROP(inst, bioz_cgmag),                 \
+            .bioz_lc_hi_lo_en = DT_INST_PROP(inst, bioz_lc_hi_lo_en),     \
+            .bioz_ln_en = DT_INST_PROP(inst, bioz_ln_en),                 \
+            .bioz_dlpf = DT_INST_PROP(inst, bioz_dlpf),                   \
+            .bioz_dhpf = DT_INST_PROP(inst, bioz_dhpf),                   \
+            .bioz_ahpf = DT_INST_PROP(inst, bioz_ahpf),                   \
+            .ecg_enabled = DT_INST_PROP(inst, ecg_enabled),               \
+            .bioz_enabled = DT_INST_PROP(inst, bioz_enabled),             \
+            .rtor_enabled = DT_INST_PROP(inst, rtor_enabled),             \
+            .ecg_dcloff_enabled = DT_INST_PROP(inst, ecg_dcloff_enable),  \
+            .ecg_dcloff_current = DT_INST_PROP(inst, ecg_dcloff_current), \
+            .ecg_invert = DT_INST_PROP(inst, ecg_invert),                 \
+                                                                          \
+    };                                                                    \
+                                                                          \
+    SENSOR_DEVICE_DT_INST_DEFINE(inst,                                    \
+                                 max30001_chip_init,                      \
+                                 PM_DEVICE_DT_INST_GET(inst),             \
+                                 &max30001_data_##inst,                   \
+                                 &max30001_config_##inst,                 \
+                                 POST_KERNEL,                             \
+                                 CONFIG_SENSOR_INIT_PRIORITY,             \
                                  &max30001_api_funcs);
 
 DT_INST_FOREACH_STATUS_OKAY(MAX30001_DEFINE)
