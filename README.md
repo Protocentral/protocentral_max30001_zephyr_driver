@@ -55,11 +55,17 @@ In the devicetree (DTS) file or DTS overlay, you need to add the following under
 	pinctrl-names = "default", "sleep";
 	cs-gpios = <&gpio1 10 GPIO_ACTIVE_LOW>;
 
-	max30001: max30001@0 {
+    max30001: max30001@0 {
 		compatible = "maxim,max30001";
+		status = "okay";
 		reg = <0x0>;
 		spi-max-frequency = <DT_FREQ_M(1)>;
-		status = "okay";
+		intb-gpios = <&gpio1 9 GPIO_ACTIVE_LOW>;
+		rtor-enabled;
+		ecg-enabled;
+		bioz-enabled;
+		ecg-gain = <3>;
+		ecg-invert;
 	};
 };
 ```
