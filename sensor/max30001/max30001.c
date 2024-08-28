@@ -609,21 +609,21 @@ static const struct sensor_driver_api max30001_api_funcs = {
 
 static int max30001_pm_action(const struct device *dev, enum pm_device_action action)
 {
-	switch (action)
-	{
-	case PM_DEVICE_ACTION_RESUME:
-		/* Enable sensor */
-		break;
+    switch (action)
+    {
+    case PM_DEVICE_ACTION_RESUME:
+        /* Enable sensor */
+        break;
 
-	case PM_DEVICE_ACTION_SUSPEND:
-		/* Disable sensor */
-		break;
+    case PM_DEVICE_ACTION_SUSPEND:
+        /* Disable sensor */
+        break;
 
-	default:
-		return -ENOTSUP;
-	}
+    default:
+        return -ENOTSUP;
+    }
 
-	return 0;
+    return 0;
 }
 #endif /* CONFIG_PM_DEVICE */
 /*
@@ -653,13 +653,13 @@ static int max30001_pm_action(const struct device *dev, enum pm_device_action ac
                                                                           \
     };                                                                    \
     PM_DEVICE_DT_INST_DEFINE(inst, max30001_pm_action);                   \
-    \ SENSOR_DEVICE_DT_INST_DEFINE(inst,                                  \
-                                   max30001_chip_init,                    \
-                                   PM_DEVICE_DT_INST_GET(inst),           \
-                                   &max30001_data_##inst,                 \
-                                   &max30001_config_##inst,               \
-                                   POST_KERNEL,                           \
-                                   CONFIG_SENSOR_INIT_PRIORITY,           \
-                                   &max30001_api_funcs);
+    SENSOR_DEVICE_DT_INST_DEFINE(inst,                                    \
+                                 max30001_chip_init,                      \
+                                 PM_DEVICE_DT_INST_GET(inst),             \
+                                 &max30001_data_##inst,                   \
+                                 &max30001_config_##inst,                 \
+                                 POST_KERNEL,                             \
+                                 CONFIG_SENSOR_INIT_PRIORITY,             \
+                                 &max30001_api_funcs);
 
 DT_INST_FOREACH_STATUS_OKAY(MAX30001_DEFINE)
