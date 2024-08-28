@@ -45,7 +45,7 @@ static int _max30001_read_chip_id(const struct device *dev, uint8_t *buf)
     const struct spi_buf_set rx = {.buffers = rx_buf, .count = 2};
 
     spi_transceive_dt(&config->spi, &tx, &rx); // regRxBuffer 0 contains NULL (for sent command), so read from 1 onwards
-    
+
     printk("MAX30001 ID: %x %x %x\n", (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2]);
 
     return 0;
@@ -65,7 +65,7 @@ static uint32_t _max30001_read_status(const struct device *dev)
     const struct spi_buf_set rx = {.buffers = rx_buf, .count = 2};
 
     spi_transceive_dt(&config->spi, &tx, &rx); // regRxBuffer 0 contains NULL (for sent command), so read from 1 onwards
-    //printk("Stat: %x %x %x\n", (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2]);
+    // printk("Stat: %x %x %x\n", (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2]);
 
     return (uint32_t)(buf[0] << 16) | (buf[1] << 8) | buf[2];
 }
@@ -129,7 +129,7 @@ static int _max30001_read_ecg_fifo(const struct device *dev, int num_bytes)
     spi_transceive_dt(&config->spi, &tx, &rx);
 
     // regRxBuffer 0 contains NULL (for sent command), so read from 1 onwards
-    //printk("%x %x %x %x\n", regRxBuffer[0], regRxBuffer[1], regRxBuffer[2], regRxBuffer[3]);
+    // printk("%x %x %x %x\n", regRxBuffer[0], regRxBuffer[1], regRxBuffer[2], regRxBuffer[3]);
 
     for (int i = 0; i < num_bytes; i += 3)
     {
@@ -223,7 +223,7 @@ static void max30001_enable_ecg(const struct device *dev)
     k_sleep(K_MSEC(100));
 
     //_max30001RegWrite(dev, CNFG_ECG, 0x835000); // Gain 160
-    //k_sleep(K_MSEC(100));
+    // k_sleep(K_MSEC(100));
 }
 
 static void max30001_enable_bioz(const struct device *dev)
@@ -291,7 +291,7 @@ static int max30001_sample_fetch(const struct device *dev,
     struct max30001_data *data = dev->data;
 
     max30001_status = _max30001_read_status(dev);
-    //printk("Status: %x\n", max30001_status);
+    // printk("Status: %x\n", max30001_status);
 
     if ((max30001_status & MAX30001_STATUS_MASK_DCLOFF) == MAX30001_STATUS_MASK_DCLOFF)
     {
@@ -309,7 +309,7 @@ static int max30001_sample_fetch(const struct device *dev,
     {
         max30001_mngr_int = _max30001_read_reg(dev, MNGR_INT);
         e_fifo_num_bytes = ((((max30001_mngr_int & MAX30001_INT_MASK_EFIT) >> MAX30001_INT_SHIFT_EFIT) + 1) * 3);
-        //printk("EFN %d ", e_fifo_num_bytes);
+        // printk("EFN %d ", e_fifo_num_bytes);
         _max30001_read_ecg_fifo(dev, e_fifo_num_bytes);
     }
 
@@ -450,7 +450,7 @@ static int max30001_chip_init(const struct device *dev)
     uint8_t chip_id[3];
     _max30001_read_chip_id(dev, chip_id);
 
-    if(chip_id[0]!=0x54)
+    if (chip_id[0] != 0x54)
     {
         LOG_ERR("MAX30001 not found");
         return -ENODEV;
@@ -605,6 +605,27 @@ static const struct sensor_driver_api max30001_api_funcs = {
 
 #define MAX30001_SPI_OPERATION (SPI_WORD_SET(8) | SPI_TRANSFER_MSB)
 
+#ifdef CONFIG_PM_DEVICE
+
+static int max30001_pm_action(const struct device *dev, enum pm_device_action action)
+{
+	switch (action)
+	{
+	case PM_DEVICE_ACTION_RESUME:
+		/* Enable sensor */
+		break;
+
+	case PM_DEVICE_ACTION_SUSPEND:
+		/* Disable sensor */
+		break;
+
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_PM_DEVICE */
 /*
  * Main instantiation macro, which selects the correct bus-specific
  * instantiation macros for the instance.
@@ -631,14 +652,14 @@ static const struct sensor_driver_api max30001_api_funcs = {
             .ecg_invert = DT_INST_PROP(inst, ecg_invert),                 \
                                                                           \
     };                                                                    \
-                                                                          \
-    SENSOR_DEVICE_DT_INST_DEFINE(inst,                                    \
-                                 max30001_chip_init,                      \
-                                 PM_DEVICE_DT_INST_GET(inst),             \
-                                 &max30001_data_##inst,                   \
-                                 &max30001_config_##inst,                 \
-                                 POST_KERNEL,                             \
-                                 CONFIG_SENSOR_INIT_PRIORITY,             \
-                                 &max30001_api_funcs);
+    PM_DEVICE_DT_INST_DEFINE(inst, max30001_pm_action);                   \
+    \ SENSOR_DEVICE_DT_INST_DEFINE(inst,                                  \
+                                   max30001_chip_init,                    \
+                                   PM_DEVICE_DT_INST_GET(inst),           \
+                                   &max30001_data_##inst,                 \
+                                   &max30001_config_##inst,               \
+                                   POST_KERNEL,                           \
+                                   CONFIG_SENSOR_INIT_PRIORITY,           \
+                                   &max30001_api_funcs);
 
 DT_INST_FOREACH_STATUS_OKAY(MAX30001_DEFINE)
